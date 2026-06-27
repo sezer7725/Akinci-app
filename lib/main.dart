@@ -276,7 +276,7 @@ class _GirisEkraniState extends State<GirisEkrani> {
                   ),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(28),
-                    child: Image.asset('assets/logo.png', fit: BoxFit.cover),
+                    child: Image.asset('logo.png', fit: BoxFit.cover),
                   ),
                 ),
                 const SizedBox(height: 28),
@@ -510,7 +510,7 @@ class _GenelEkraniState extends State<GenelEkrani> {
         ),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(12),
-          child: Image.asset('assets/logo.png', fit: BoxFit.cover),
+          child: Image.asset('logo.png', fit: BoxFit.cover),
         ),
       ),
       const SizedBox(width: 12),
