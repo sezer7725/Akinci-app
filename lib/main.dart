@@ -215,7 +215,7 @@ class _AnaKabukState extends State<AnaKabuk> {
     final ekranlar = [
       const GenelEkrani(),
       const _YakindaEkrani(baslik: "CANLI GRAFIK"),
-      const _YakindaEkrani(baslik: "POZISYONLAR"),
+      const PozisyonEkrani(),
       const _YakindaEkrani(baslik: "MESAJ & ASISTAN"),
     ];
     return Scaffold(
@@ -623,5 +623,245 @@ class _YakindaEkrani extends StatelessWidget {
         ]),
       ),
     );
+  }
+}
+
+// ============================================================
+//  POZISYON EKRANI - acik pozisyonlarin detayli listesi
+//  panel.py /durum'dan acik_pozisyon listesini ceker (5sn'de bir),
+//  her pozisyonu zengin bir kartta gosterir: yon, giris, mark, stop,
+//  hedef, kaldirac, senaryo, kar/zarar + stop'a ve hedefe uzaklik %.
+// ============================================================
+class PozisyonEkrani extends StatefulWidget {
+  const PozisyonEkrani({super.key});
+  @override
+  State<PozisyonEkrani> createState() => _PozisyonEkraniState();
+}
+
+class _PozisyonEkraniState extends State<PozisyonEkrani> {
+  List<dynamic> _pozlar = [];
+  bool _yukleniyor = true;
+  bool _hata = false;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _cek();
+    _timer = Timer.periodic(const Duration(seconds: 5), (_) => _cek());
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _cek() async {
+    try {
+      final r = await http.get(Uri.parse("$kPanelUrl/durum"))
+          .timeout(const Duration(seconds: 8));
+      if (r.statusCode == 200) {
+        final d = json.decode(utf8.decode(r.bodyBytes));
+        if (mounted) {
+          setState(() {
+            _pozlar = (d['acik_pozisyon'] as List?) ?? [];
+            _yukleniyor = false;
+            _hata = false;
+          });
+        }
+      } else {
+        if (mounted) setState(() { _hata = true; _yukleniyor = false; });
+      }
+    } catch (_) {
+      if (mounted) setState(() { _hata = true; _yukleniyor = false; });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Column(children: [
+        // baslik
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+          child: Row(children: [
+            const Text("ACIK POZISYONLAR",
+                style: TextStyle(color: Renk.yazi, fontSize: 18, fontWeight: FontWeight.w700, letterSpacing: 1)),
+            const Spacer(),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: Renk.teal.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text("${_pozlar.length} / 4",
+                  style: const TextStyle(color: Renk.teal, fontSize: 13, fontWeight: FontWeight.w700)),
+            ),
+          ]),
+        ),
+        Expanded(
+          child: _yukleniyor
+              ? const Center(child: CircularProgressIndicator(color: Renk.teal))
+              : _hata
+                  ? _hataKutu()
+                  : _pozlar.isEmpty
+                      ? _bosKutu()
+                      : RefreshIndicator(
+                          color: Renk.teal,
+                          backgroundColor: Renk.kart,
+                          onRefresh: _cek,
+                          child: ListView.builder(
+                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+                            itemCount: _pozlar.length,
+                            itemBuilder: (c, i) => _pozKarti(_pozlar[i]),
+                          ),
+                        ),
+        ),
+      ]),
+    );
+  }
+
+  Widget _pozKarti(dynamic p) {
+    final yon = (p['yon'] ?? '?').toString();
+    final long = yon == 'LONG';
+    final pnl = (p['pnl'] ?? 0).toDouble();
+    final yuzde = (p['yuzde'] ?? 0).toDouble();
+    final karda = pnl >= 0;
+    final renk = long ? Renk.teal : Renk.kirmizi;
+    final pnlRenk = karda ? Renk.teal : Renk.kirmizi;
+
+    final giris = (p['giris'] ?? 0).toDouble();
+    final mark = (p['mark'] ?? 0).toDouble();
+    final stop = (p['stop'] ?? 0).toDouble();
+    final hedef = (p['hedef'] ?? 0).toDouble();
+    final kaldirac = p['kaldirac'];
+    final senaryo = (p['senaryo'] ?? '').toString();
+
+    // stop'a ve hedefe uzaklik % (mark'a gore)
+    String stopUz = "-";
+    String hedefUz = "-";
+    if (mark > 0 && stop > 0) {
+      stopUz = "${((stop - mark) / mark * 100).abs().toStringAsFixed(2)}%";
+    }
+    if (mark > 0 && hedef > 0) {
+      hedefUz = "${((hedef - mark) / mark * 100).abs().toStringAsFixed(2)}%";
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Renk.kart,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: renk.withOpacity(0.3)),
+      ),
+      child: Column(children: [
+        // ust satir: yon + sembol + pnl
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+              decoration: BoxDecoration(
+                color: renk.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(7),
+              ),
+              child: Row(children: [
+                Icon(long ? Icons.trending_up : Icons.trending_down, color: renk, size: 14),
+                const SizedBox(width: 4),
+                Text(yon, style: TextStyle(color: renk, fontSize: 12, fontWeight: FontWeight.w700)),
+              ]),
+            ),
+            const SizedBox(width: 10),
+            Text(p['sembol'] ?? '', style: const TextStyle(color: Renk.yazi, fontSize: 16, fontWeight: FontWeight.w700)),
+            if (kaldirac != null && kaldirac != 0) ...[
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Renk.yaziSoluk.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(5),
+                ),
+                child: Text("${kaldirac}x", style: const TextStyle(color: Renk.yaziSoluk, fontSize: 11, fontWeight: FontWeight.w600)),
+              ),
+            ],
+            const Spacer(),
+            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              Text("${karda ? '+' : ''}\$${_v(pnl)}",
+                  style: TextStyle(color: pnlRenk, fontSize: 17, fontWeight: FontWeight.w700)),
+              Text("${karda ? '+' : ''}${yuzde.toStringAsFixed(2)}%",
+                  style: TextStyle(color: pnlRenk, fontSize: 12, fontWeight: FontWeight.w500)),
+            ]),
+          ]),
+        ),
+        Divider(color: Renk.cizgi, height: 1),
+        // alt: fiyat detaylari
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(children: [
+            Row(children: [
+              Expanded(child: _bilgi("GIRIS", "\$${_f(giris)}", Renk.yazi)),
+              Expanded(child: _bilgi("ANLIK", "\$${_f(mark)}", karda ? Renk.teal : Renk.kirmizi)),
+            ]),
+            const SizedBox(height: 14),
+            Row(children: [
+              Expanded(child: _bilgi("STOP", "\$${_f(stop)}", Renk.kirmizi, alt: "uzaklik $stopUz")),
+              Expanded(child: _bilgi("HEDEF", hedef > 0 ? "\$${_f(hedef)}" : "trailing", Renk.altin, alt: hedef > 0 ? "uzaklik $hedefUz" : "tepe takip")),
+            ]),
+            if (senaryo.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              Row(children: [
+                Icon(Icons.bookmark_outline, color: Renk.yaziSoluk, size: 14),
+                const SizedBox(width: 6),
+                Text("Senaryo: ", style: TextStyle(color: Renk.yaziSoluk, fontSize: 12)),
+                Text(senaryo, style: const TextStyle(color: Renk.mavi, fontSize: 12, fontWeight: FontWeight.w600)),
+              ]),
+            ],
+          ]),
+        ),
+      ]),
+    );
+  }
+
+  Widget _bilgi(String etiket, String deger, Color renk, {String? alt}) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(etiket, style: const TextStyle(color: Renk.yaziSoluk, fontSize: 10, letterSpacing: 0.5)),
+      const SizedBox(height: 3),
+      Text(deger, style: TextStyle(color: renk, fontSize: 15, fontWeight: FontWeight.w700)),
+      if (alt != null) ...[
+        const SizedBox(height: 2),
+        Text(alt, style: TextStyle(color: Renk.yaziSoluk.withOpacity(0.7), fontSize: 10)),
+      ],
+    ]);
+  }
+
+  Widget _bosKutu() {
+    return ListView(children: [
+      const SizedBox(height: 80),
+      Icon(Icons.inbox_outlined, color: Renk.yaziSoluk.withOpacity(0.4), size: 56),
+      const SizedBox(height: 16),
+      const Center(child: Text("Acik pozisyon yok", style: TextStyle(color: Renk.yazi, fontSize: 16, fontWeight: FontWeight.w600))),
+      const SizedBox(height: 6),
+      Center(child: Text("Bot uygun sinyal bekliyor", style: TextStyle(color: Renk.yaziSoluk, fontSize: 13))),
+    ]);
+  }
+
+  Widget _hataKutu() {
+    return ListView(children: [
+      const SizedBox(height: 80),
+      Icon(Icons.cloud_off_outlined, color: Renk.kirmizi.withOpacity(0.5), size: 56),
+      const SizedBox(height: 16),
+      const Center(child: Text("Panele baglanilamadi", style: TextStyle(color: Renk.yazi, fontSize: 16, fontWeight: FontWeight.w600))),
+      const SizedBox(height: 6),
+      Center(child: Text("panel.py calisiyor mu?", style: TextStyle(color: Renk.yaziSoluk, fontSize: 13))),
+    ]);
+  }
+
+  // sayi bicimleme
+  String _v(double x) => x.toStringAsFixed(2);
+  String _f(double x) {
+    if (x >= 100) return x.toStringAsFixed(2);
+    if (x >= 1) return x.toStringAsFixed(4);
+    return x.toStringAsFixed(6);
   }
 }
