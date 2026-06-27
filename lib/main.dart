@@ -12,9 +12,11 @@
 // ============================================================
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   runApp(const AkinciApp());
@@ -75,6 +77,42 @@ class _GirisEkraniState extends State<GirisEkrani> {
   final _sifreCtrl = TextEditingController();
   String? _hata;
   bool _yukleniyor = false;
+  bool _beniHatirla = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _kayitliBilgiYukle();
+  }
+
+  // Kayitli giris bilgisi varsa yukle; "beni hatirla" isaretliyse otomatik gir
+  Future<void> _kayitliBilgiYukle() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      final hatirla = p.getBool('beni_hatirla') ?? false;
+      if (hatirla) {
+        final k = p.getString('kullanici') ?? '';
+        final s = p.getString('sifre') ?? '';
+        if (k == kKullanici && s == kSifre) {
+          // dogru bilgi kayitli -> direkt panele gec
+          if (mounted) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => const AnaKabuk()),
+            );
+          }
+          return;
+        }
+      }
+      // hatirla kapali ama kullanici adi dolduralim (kolaylik)
+      if (mounted) {
+        setState(() {
+          _kullaniciCtrl.text = p.getString('kullanici') ?? '';
+          _beniHatirla = hatirla;
+        });
+      }
+    } catch (_) {}
+  }
 
   void _girisYap() async {
     setState(() { _hata = null; _yukleniyor = true; });
@@ -84,6 +122,18 @@ class _GirisEkraniState extends State<GirisEkrani> {
     final s = _sifreCtrl.text;
     if (k == kKullanici && s == kSifre) {
       HapticFeedback.mediumImpact();
+      // beni hatirla durumunu kaydet
+      try {
+        final p = await SharedPreferences.getInstance();
+        await p.setBool('beni_hatirla', _beniHatirla);
+        if (_beniHatirla) {
+          await p.setString('kullanici', k);
+          await p.setString('sifre', s);
+        } else {
+          await p.remove('sifre');  // sifreyi tutma, sadece kullanici adi kalsin
+          await p.setString('kullanici', k);
+        }
+      } catch (_) {}
       if (!mounted) return;
       Navigator.pushReplacement(
         context,
@@ -98,7 +148,27 @@ class _GirisEkraniState extends State<GirisEkrani> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: SafeArea(
+      body: Stack(
+        children: [
+          // --- ARKA PLAN: turkuaz kod yagmuru (Matrix tarzi) ---
+          const Positioned.fill(child: KodYagmuru()),
+          // --- hafif karartma (yazilar net okunsun) ---
+          Positioned.fill(
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter, end: Alignment.bottomCenter,
+                  colors: [
+                    Renk.arkaplan.withOpacity(0.55),
+                    Renk.arkaplan.withOpacity(0.80),
+                    Renk.arkaplan.withOpacity(0.92),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          // --- ON PLAN: logo + form ---
+          SafeArea(
         child: Center(
           child: SingleChildScrollView(
             padding: const EdgeInsets.symmetric(horizontal: 32),
@@ -134,6 +204,34 @@ class _GirisEkraniState extends State<GirisEkrani> {
                 const SizedBox(height: 14),
                 // --- Sifre ---
                 _girisAlani(_sifreCtrl, "Sifre", Icons.lock_outline, true),
+                const SizedBox(height: 6),
+                // --- Beni hatirla ---
+                GestureDetector(
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    setState(() => _beniHatirla = !_beniHatirla);
+                  },
+                  behavior: HitTestBehavior.opaque,
+                  child: Row(children: [
+                    Container(
+                      width: 22, height: 22,
+                      decoration: BoxDecoration(
+                        color: _beniHatirla ? Renk.teal : Colors.transparent,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: _beniHatirla ? Renk.teal : Renk.yaziSoluk.withOpacity(0.5),
+                          width: 1.5,
+                        ),
+                      ),
+                      child: _beniHatirla
+                          ? const Icon(Icons.check, color: Renk.arkaplan, size: 16)
+                          : null,
+                    ),
+                    const SizedBox(width: 10),
+                    Text("Beni hatirla",
+                        style: TextStyle(color: Renk.yaziSoluk, fontSize: 13, fontWeight: FontWeight.w500)),
+                  ]),
+                ),
                 if (_hata != null) ...[
                   const SizedBox(height: 14),
                   Row(children: [
@@ -170,6 +268,8 @@ class _GirisEkraniState extends State<GirisEkrani> {
             ),
           ),
         ),
+      ),
+        ],
       ),
     );
   }
@@ -864,4 +964,149 @@ class _PozisyonEkraniState extends State<PozisyonEkrani> {
     if (x >= 1) return x.toStringAsFixed(4);
     return x.toStringAsFixed(6);
   }
+}
+
+// ============================================================
+//  KOD YAGMURU - turkuaz Matrix tarzi arka plan animasyonu
+//  Giris ekraninin arkasinda yukaridan asagi akan kod/karakterler.
+//  Hafif, performansli; logo ve form onde net durur.
+// ============================================================
+class KodYagmuru extends StatefulWidget {
+  const KodYagmuru({super.key});
+  @override
+  State<KodYagmuru> createState() => _KodYagmuruState();
+}
+
+class _KodYagmuruState extends State<KodYagmuru> with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  final List<_Sutun> _sutunlar = [];
+  final math.Random _rng = math.Random();
+  Size _boyut = Size.zero;
+
+  // akan karakterler (rakam + harf + sembol karisik, "kod" hissi)
+  static const String _karakterler = "01<>{}[]()/*+-=;:.\$#&%abcdef0123456789ABCDEF";
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(vsync: this, duration: const Duration(seconds: 1))
+      ..repeat();
+  }
+
+  void _sutunlariKur(Size boyut) {
+    _boyut = boyut;
+    _sutunlar.clear();
+    const double sutunGenislik = 16; // karakter sutun araligi
+    final int adet = (boyut.width / sutunGenislik).ceil();
+    for (int i = 0; i < adet; i++) {
+      _sutunlar.add(_Sutun(
+        x: i * sutunGenislik,
+        y: _rng.nextDouble() * boyut.height,
+        hiz: 40 + _rng.nextDouble() * 90,        // px/sn
+        uzunluk: 6 + _rng.nextInt(14),           // kuyruk uzunlugu
+        karakterler: List.generate(20, (_) => _rastgeleKarakter()),
+        sonGuncelleme: 0,
+      ));
+    }
+  }
+
+  String _rastgeleKarakter() =>
+      _karakterler[_rng.nextInt(_karakterler.length)];
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(builder: (context, c) {
+      final boyut = Size(c.maxWidth, c.maxHeight);
+      if (boyut != _boyut || _sutunlar.isEmpty) {
+        _sutunlariKur(boyut);
+      }
+      return AnimatedBuilder(
+        animation: _ctrl,
+        builder: (context, _) {
+          // her karede sutunlari ilerlet
+          for (final s in _sutunlar) {
+            s.y += s.hiz * (1 / 60.0);  // ~60fps varsayimi
+            if (s.y - s.uzunluk * 16 > boyut.height) {
+              s.y = -_rng.nextDouble() * 200;
+              s.hiz = 40 + _rng.nextDouble() * 90;
+              // ara sira karakterleri tazele
+              if (_rng.nextDouble() < 0.5) {
+                s.karakterler = List.generate(20, (_) => _rastgeleKarakter());
+              }
+            }
+          }
+          return CustomPaint(
+            size: boyut,
+            painter: _YagmurPainter(_sutunlar),
+          );
+        },
+      );
+    });
+  }
+}
+
+class _Sutun {
+  double x;
+  double y;
+  double hiz;
+  int uzunluk;
+  List<String> karakterler;
+  double sonGuncelleme;
+  _Sutun({
+    required this.x,
+    required this.y,
+    required this.hiz,
+    required this.uzunluk,
+    required this.karakterler,
+    required this.sonGuncelleme,
+  });
+}
+
+class _YagmurPainter extends CustomPainter {
+  final List<_Sutun> sutunlar;
+  _YagmurPainter(this.sutunlar);
+
+  static const double _satirYuksek = 16;
+  static const Color _teal = Color(0xFF00F0B5);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final tp = TextPainter(textDirection: TextDirection.ltr);
+    for (final s in sutunlar) {
+      for (int i = 0; i < s.uzunluk; i++) {
+        final double cy = s.y - i * _satirYuksek;
+        if (cy < -_satirYuksek || cy > size.height) continue;
+        // bas karakter parlak, kuyruk soluk
+        double op;
+        Color renk;
+        if (i == 0) {
+          op = 0.95; renk = Colors.white.withOpacity(op);  // bas: beyazimsi parlak
+        } else {
+          op = (1.0 - i / s.uzunluk) * 0.55;               // kuyruk: teal, giderek soluk
+          renk = _teal.withOpacity(op.clamp(0.0, 1.0));
+        }
+        final ch = s.karakterler[i % s.karakterler.length];
+        tp.text = TextSpan(
+          text: ch,
+          style: TextStyle(
+            color: renk,
+            fontSize: 13,
+            fontFamily: 'monospace',
+            fontWeight: i == 0 ? FontWeight.w600 : FontWeight.w400,
+          ),
+        );
+        tp.layout();
+        tp.paint(canvas, Offset(s.x, cy));
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _YagmurPainter old) => true;
 }
