@@ -43,6 +43,95 @@ const String kSifre     = "akinci77";
 // ---- Panel adresi ----
 const String kPanelUrl = "http://127.0.0.1:8080";
 
+// ============================================================
+//  DURUM SERVISI - uygulamanin merkezi veri beyni (singleton)
+// ============================================================
+//  NEDEN: Eskiden her ekran (Genel, Pozisyon...) ayri ayri panel'e
+//  istek atiyordu. Sonuc: sekme gecisinde bekleme, tek istek
+//  iskalayinca kirmizi bant titremesi, panel'in 3 kat yorulmasi.
+//
+//  COZUM: Tek servis arka planda surekli panel'i dinler (5sn),
+//  veriyi hafizada tutar. Tum ekranlar BU servisten okur, kendileri
+//  istek ATMAZ. Faydalari:
+//   - Sekme gecisi ANINDA (veri zaten hazir, bekleme yok)
+//   - Tek baglanti noktasi (panel rahat)
+//   - Akilli kopukluk: bir istek iskalarsa SON veriyi gosterir,
+//     kirmizi uyari ancak ust uste 3 iskada (~15sn) cikar -> titreme yok
+//   - ChangeNotifier: veri degisince dinleyen ekranlar otomatik yenilenir
+//
+//  Flutter standardi, EKSTRA PAKET YOK.
+// ============================================================
+class DurumServisi extends ChangeNotifier {
+  DurumServisi._();
+  static final DurumServisi instance = DurumServisi._();
+
+  Map<String, dynamic>? _veri;        // son basarili panel verisi
+  DateTime? _sonBasari;               // en son ne zaman veri geldi
+  int _ardArdaHata = 0;               // ust uste kac istek iskaladi
+  bool _ilkYukleme = true;            // hic veri gelmedi mi
+  Timer? _zamanlayici;
+  bool _calisiyor = false;
+
+  // --- disari acilan durum ---
+  Map<String, dynamic>? get veri => _veri;
+  bool get ilkYukleme => _ilkYukleme;
+  // Baglanti "kopuk" sayilir: ust uste 3+ hata VE elde veri yoksa ya da
+  // son basaridan 20sn+ gectiyse. Tek/iki iskada kopuk DEMEZ (titreme onleme).
+  bool get bagliMi {
+    if (_veri == null) return false;
+    if (_sonBasari == null) return false;
+    final gecen = DateTime.now().difference(_sonBasari!).inSeconds;
+    return _ardArdaHata < 3 && gecen < 20;
+  }
+  // "kac saniye once guncellendi" (UI'da gostermek icin)
+  int get saniyeOnce {
+    if (_sonBasari == null) return -1;
+    return DateTime.now().difference(_sonBasari!).inSeconds;
+  }
+
+  // Uygulama acilinca BIR KEZ baslatilir (AnaKabuk'tan)
+  void basla() {
+    if (_calisiyor) return;
+    _calisiyor = true;
+    _cek();
+    _zamanlayici = Timer.periodic(const Duration(seconds: 5), (_) => _cek());
+  }
+
+  void durdur() {
+    _zamanlayici?.cancel();
+    _zamanlayici = null;
+    _calisiyor = false;
+  }
+
+  // Kullanicinin elle yenilemesi icin (pull-to-refresh)
+  Future<void> elleYenile() async => _cek();
+
+  Future<void> _cek() async {
+    try {
+      final r = await http.get(Uri.parse("$kPanelUrl/durum"))
+          .timeout(const Duration(seconds: 6));
+      if (r.statusCode == 200) {
+        _veri = json.decode(utf8.decode(r.bodyBytes));
+        _sonBasari = DateTime.now();
+        _ardArdaHata = 0;
+        _ilkYukleme = false;
+        notifyListeners();
+        return;
+      }
+      _hataOldu();
+    } catch (_) {
+      _hataOldu();
+    }
+  }
+
+  void _hataOldu() {
+    _ardArdaHata++;
+    _ilkYukleme = false;
+    // VERIYI SILME: son basarili veri ekranda kalsin (titreme yok)
+    notifyListeners();
+  }
+}
+
 class AkinciApp extends StatelessWidget {
   const AkinciApp({super.key});
   @override
@@ -176,21 +265,19 @@ class _GirisEkraniState extends State<GirisEkrani> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 const SizedBox(height: 24),
-                // --- Logo (rozet stili, gercek logo asset gelince degisecek) ---
+                // --- Logo (gercek kurt+kartal logosu) ---
                 Container(
-                  width: 120, height: 120,
+                  width: 130, height: 130,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(28),
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFF13233C), Color(0xFF0B1320)],
-                      begin: Alignment.topLeft, end: Alignment.bottomRight,
-                    ),
-                    border: Border.all(color: Renk.teal.withOpacity(0.3), width: 1.5),
                     boxShadow: [
-                      BoxShadow(color: Renk.teal.withOpacity(0.15), blurRadius: 30, spreadRadius: 2),
+                      BoxShadow(color: Renk.teal.withOpacity(0.25), blurRadius: 40, spreadRadius: 4),
                     ],
                   ),
-                  child: const Icon(Icons.shield_outlined, color: Renk.teal, size: 56),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(28),
+                    child: Image.asset('assets/logo.png', fit: BoxFit.cover),
+                  ),
                 ),
                 const SizedBox(height: 28),
                 const Text("AKINCI",
@@ -310,6 +397,13 @@ class _AnaKabukState extends State<AnaKabuk> {
   int _sekme = 0;
 
   @override
+  void initState() {
+    super.initState();
+    // Uygulamanin merkezi veri beynini baslat (tum ekranlar bundan beslenir)
+    DurumServisi.instance.basla();
+  }
+
+  @override
   Widget build(BuildContext context) {
     // v1: sadece Genel ekrani dolu; digerleri "yakinda"
     final ekranlar = [
@@ -357,45 +451,28 @@ class GenelEkrani extends StatefulWidget {
 }
 
 class _GenelEkraniState extends State<GenelEkrani> {
-  Map<String, dynamic>? _durum;
-  String? _hata;
-  bool _ilkYukleme = true;
-  Timer? _zamanlayici;
+  final _servis = DurumServisi.instance;
 
   @override
   void initState() {
     super.initState();
-    _veriCek();
-    // Her 5 saniyede bir guncelle
-    _zamanlayici = Timer.periodic(const Duration(seconds: 5), (_) => _veriCek());
+    _servis.addListener(_guncelle);
   }
 
   @override
   void dispose() {
-    _zamanlayici?.cancel();
+    _servis.removeListener(_guncelle);
     super.dispose();
   }
 
-  Future<void> _veriCek() async {
-    try {
-      final r = await http.get(Uri.parse("$kPanelUrl/durum"))
-          .timeout(const Duration(seconds: 6));
-      if (r.statusCode == 200) {
-        setState(() {
-          _durum = json.decode(utf8.decode(r.bodyBytes));
-          _hata = null;
-          _ilkYukleme = false;
-        });
-      } else {
-        setState(() { _hata = "Panel cevap vermedi (${r.statusCode})"; _ilkYukleme = false; });
-      }
-    } catch (e) {
-      setState(() {
-        _hata = "Panele baglanilamadi";
-        _ilkYukleme = false;
-      });
-    }
+  void _guncelle() {
+    if (mounted) setState(() {});
   }
+
+  // servisten kisayollar
+  Map<String, dynamic>? get _durum => _servis.veri;
+  bool get _ilkYukleme => _servis.ilkYukleme;
+  bool get _bagli => _servis.bagliMi;
 
   @override
   Widget build(BuildContext context) {
@@ -403,7 +480,7 @@ class _GenelEkraniState extends State<GenelEkrani> {
       child: RefreshIndicator(
         color: Renk.teal,
         backgroundColor: Renk.kart,
-        onRefresh: _veriCek,
+        onRefresh: _servis.elleYenile,
         child: _ilkYukleme
           ? const Center(child: CircularProgressIndicator(color: Renk.teal))
           : ListView(
@@ -411,7 +488,7 @@ class _GenelEkraniState extends State<GenelEkrani> {
               children: [
                 _baslik(),
                 const SizedBox(height: 20),
-                if (_hata != null) _hataKarti(),
+                if (!_bagli) _hataKarti(),
                 if (_durum != null) ..._icerik(),
               ],
             ),
@@ -427,10 +504,14 @@ class _GenelEkraniState extends State<GenelEkrani> {
         width: 44, height: 44,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(12),
-          color: Renk.kartAcik,
-          border: Border.all(color: Renk.teal.withOpacity(0.3)),
+          boxShadow: [
+            BoxShadow(color: Renk.teal.withOpacity(0.2), blurRadius: 12, spreadRadius: 1),
+          ],
         ),
-        child: const Icon(Icons.shield_outlined, color: Renk.teal, size: 24),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Image.asset('assets/logo.png', fit: BoxFit.cover),
+        ),
       ),
       const SizedBox(width: 12),
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [
@@ -439,7 +520,61 @@ class _GenelEkraniState extends State<GenelEkrani> {
       ]),
       const Spacer(),
       _rozet(aktif ? "CANLI" : "DURDU", aktif ? Renk.teal : Renk.kirmizi),
+      const SizedBox(width: 8),
+      // cikis yap butonu
+      GestureDetector(
+        onTap: _cikisYap,
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          width: 38, height: 38,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            color: Renk.kartAcik,
+            border: Border.all(color: Renk.cizgi),
+          ),
+          child: Icon(Icons.logout, color: Renk.yaziSoluk, size: 18),
+        ),
+      ),
     ]);
+  }
+
+  void _cikisYap() async {
+    HapticFeedback.mediumImpact();
+    final onay = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        backgroundColor: Renk.kart,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text("Cikis Yap", style: TextStyle(color: Renk.yazi, fontSize: 18, fontWeight: FontWeight.w700)),
+        content: const Text("Oturumu kapatmak istedigine emin misin?",
+            style: TextStyle(color: Renk.yaziSoluk, fontSize: 14)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text("Vazgec", style: TextStyle(color: Renk.yaziSoluk)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text("Cikis Yap", style: TextStyle(color: Renk.kirmizi, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+    if (onay == true) {
+      // beni hatirla bilgisini sil
+      try {
+        final p = await SharedPreferences.getInstance();
+        await p.setBool('beni_hatirla', false);
+        await p.remove('sifre');
+      } catch (_) {}
+      // veri servisini durdur
+      DurumServisi.instance.durdur();
+      if (!mounted) return;
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const GirisEkrani()),
+      );
+    }
   }
 
   Widget _rozet(String yazi, Color renk) {
@@ -471,7 +606,7 @@ class _GenelEkraniState extends State<GenelEkrani> {
         const Icon(Icons.wifi_off, color: Renk.kirmizi, size: 20),
         const SizedBox(width: 12),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(_hata!, style: const TextStyle(color: Renk.kirmizi, fontSize: 14, fontWeight: FontWeight.w600)),
+          const Text("Panele baglanilamadi", style: TextStyle(color: Renk.kirmizi, fontSize: 14, fontWeight: FontWeight.w600)),
           const SizedBox(height: 2),
           Text("panel.py calisiyor mu? (Termux'ta python panel.py)",
             style: TextStyle(color: Renk.yaziSoluk, fontSize: 12)),
@@ -739,44 +874,28 @@ class PozisyonEkrani extends StatefulWidget {
 }
 
 class _PozisyonEkraniState extends State<PozisyonEkrani> {
-  List<dynamic> _pozlar = [];
-  bool _yukleniyor = true;
-  bool _hata = false;
-  Timer? _timer;
+  final _servis = DurumServisi.instance;
 
   @override
   void initState() {
     super.initState();
-    _cek();
-    _timer = Timer.periodic(const Duration(seconds: 5), (_) => _cek());
+    _servis.addListener(_guncelle);
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
+    _servis.removeListener(_guncelle);
     super.dispose();
   }
 
-  Future<void> _cek() async {
-    try {
-      final r = await http.get(Uri.parse("$kPanelUrl/durum"))
-          .timeout(const Duration(seconds: 8));
-      if (r.statusCode == 200) {
-        final d = json.decode(utf8.decode(r.bodyBytes));
-        if (mounted) {
-          setState(() {
-            _pozlar = (d['acik_pozisyon'] as List?) ?? [];
-            _yukleniyor = false;
-            _hata = false;
-          });
-        }
-      } else {
-        if (mounted) setState(() { _hata = true; _yukleniyor = false; });
-      }
-    } catch (_) {
-      if (mounted) setState(() { _hata = true; _yukleniyor = false; });
-    }
+  void _guncelle() {
+    if (mounted) setState(() {});
   }
+
+  // servisten kisayollar
+  List<dynamic> get _pozlar => (_servis.veri?['acik_pozisyon'] as List?) ?? [];
+  bool get _yukleniyor => _servis.ilkYukleme;
+  bool get _hata => !_servis.bagliMi && _servis.veri == null;
 
   @override
   Widget build(BuildContext context) {
@@ -810,7 +929,7 @@ class _PozisyonEkraniState extends State<PozisyonEkrani> {
                       : RefreshIndicator(
                           color: Renk.teal,
                           backgroundColor: Renk.kart,
-                          onRefresh: _cek,
+                          onRefresh: _servis.elleYenile,
                           child: ListView.builder(
                             padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
                             itemCount: _pozlar.length,
