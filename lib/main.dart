@@ -385,7 +385,149 @@ class _GirisEkraniState extends State<GirisEkrani> {
 }
 
 // ============================================================
-//  ANA KABUK (alt sekme cubugu - su an sadece Genel dolu)
+//  PANELDEN TEK SEFERLIK VERI CEKME + ORTAK YARDIMCILAR
+// ============================================================
+Future<dynamic> _panel(String yol) async {
+  try {
+    final r = await http
+        .get(Uri.parse("$kPanelUrl$yol"))
+        .timeout(const Duration(seconds: 15));
+    if (r.statusCode == 200) {
+      return json.decode(utf8.decode(r.bodyBytes));
+    }
+  } catch (_) {}
+  return null;
+}
+
+double _d(dynamic v) => v == null
+    ? 0.0
+    : (v is num ? v.toDouble() : (double.tryParse(v.toString()) ?? 0.0));
+
+String _para(num v, {bool isaret = false}) {
+  final govde = v.abs().toStringAsFixed(2);
+  final on = isaret ? (v >= 0 ? "+" : "-") : (v < 0 ? "-" : "");
+  return "$on\$$govde";
+}
+
+Color _pnlRenk(num v) => v >= 0 ? Renk.teal : Renk.kirmizi;
+
+const TextStyle _baslikStil = TextStyle(
+    color: Renk.yazi, fontSize: 14, fontWeight: FontWeight.w700, letterSpacing: 1);
+const TextStyle _kucukBaslik = TextStyle(
+    color: Renk.yaziSoluk, fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 1);
+
+Widget _kart({required Widget cocuk, EdgeInsets? ic}) {
+  return Container(
+    padding: ic ?? const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: Renk.kart,
+      borderRadius: BorderRadius.circular(18),
+      border: Border.all(color: Renk.cizgi),
+    ),
+    child: cocuk,
+  );
+}
+
+Widget _bosKutu(String mesaj) => _kart(
+    cocuk: Center(
+        child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            child: Text(mesaj, style: const TextStyle(color: Renk.yaziSoluk)))));
+
+Widget _durumRozet(bool aktif) {
+  final renk = aktif ? Renk.teal : Renk.kirmizi;
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+    decoration: BoxDecoration(
+      color: renk.withOpacity(0.12),
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: renk.withOpacity(0.5)),
+    ),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      Container(width: 8, height: 8, decoration: BoxDecoration(color: renk, shape: BoxShape.circle)),
+      const SizedBox(width: 6),
+      Text(aktif ? "CANLI" : "DURDU",
+          style: TextStyle(color: renk, fontSize: 12, fontWeight: FontWeight.w700)),
+    ]),
+  );
+}
+
+Widget _ustBar(BuildContext ctx, {required bool aktif, VoidCallback? cikis}) {
+  return Row(children: [
+    ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: SizedBox(width: 44, height: 44, child: Image.asset('logo.png', fit: BoxFit.cover)),
+    ),
+    const SizedBox(width: 12),
+    Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [
+      Text("AKINCI",
+          style: TextStyle(color: Renk.yazi, fontSize: 18, fontWeight: FontWeight.w700, letterSpacing: 2)),
+      Text("KOMUTA MERKEZI",
+          style: TextStyle(color: Renk.yaziSoluk, fontSize: 10, letterSpacing: 3)),
+    ]),
+    const Spacer(),
+    _durumRozet(aktif),
+    if (cikis != null) ...[
+      const SizedBox(width: 10),
+      GestureDetector(
+        onTap: cikis,
+        child: Container(
+          padding: const EdgeInsets.all(9),
+          decoration: BoxDecoration(color: Renk.kartAcik, borderRadius: BorderRadius.circular(10)),
+          child: const Icon(Icons.logout, color: Renk.yaziSoluk, size: 18),
+        ),
+      ),
+    ],
+  ]);
+}
+
+Widget _coinSecici(List<String> coinler, String secili, void Function(String) sec) {
+  return SizedBox(
+    height: 38,
+    child: ListView(
+      scrollDirection: Axis.horizontal,
+      children: coinler.map((c) {
+        final aktif = c == secili;
+        return Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: GestureDetector(
+            onTap: () => sec(c),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: aktif ? Renk.teal.withOpacity(0.15) : Renk.kart,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: aktif ? Renk.teal : Renk.cizgi),
+              ),
+              child: Text(c,
+                  style: TextStyle(
+                      color: aktif ? Renk.teal : Renk.yaziSoluk,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13)),
+            ),
+          ),
+        );
+      }).toList(),
+    ),
+  );
+}
+
+Future<void> _cikisYap(BuildContext ctx) async {
+  try {
+    final p = await SharedPreferences.getInstance();
+    for (final k in ["beniHatirla", "hatirla", "remember", "beni_hatirla", "autoLogin"]) {
+      await p.remove(k);
+    }
+  } catch (_) {}
+  DurumServisi.instance.durdur();
+  if (ctx.mounted) {
+    Navigator.of(ctx).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const GirisEkrani()), (r) => false);
+  }
+}
+
+// ============================================================
+//  ANA KABUK - 4 sekme: Ana Sayfa, Grafik, AI Analiz, Mesaj
 // ============================================================
 class AnaKabuk extends StatefulWidget {
   const AnaKabuk({super.key});
@@ -399,41 +541,41 @@ class _AnaKabukState extends State<AnaKabuk> {
   @override
   void initState() {
     super.initState();
-    // Uygulamanin merkezi veri beynini baslat (tum ekranlar bundan beslenir)
     DurumServisi.instance.basla();
   }
 
+  void _git(int i) => setState(() => _sekme = i);
+
   @override
   Widget build(BuildContext context) {
-    // v1: sadece Genel ekrani dolu; digerleri "yakinda"
     final ekranlar = [
-      const GenelEkrani(),
-      const _YakindaEkrani(baslik: "CANLI GRAFIK"),
-      const PozisyonEkrani(),
-      const _YakindaEkrani(baslik: "MESAJ & ASISTAN"),
+      DashboardEkrani(onSekme: _git),
+      const GrafikEkrani(),
+      const AIAnalizEkrani(),
+      const MesajEkrani(),
     ];
     return Scaffold(
-      body: ekranlar[_sekme],
+      body: SafeArea(bottom: false, child: IndexedStack(index: _sekme, children: ekranlar)),
       bottomNavigationBar: Container(
         decoration: const BoxDecoration(
           color: Renk.kart,
-          border: Border(top: BorderSide(color: Renk.cizgi, width: 1)),
+          border: Border(top: BorderSide(color: Renk.cizgi)),
         ),
         child: BottomNavigationBar(
           currentIndex: _sekme,
-          onTap: (i) { HapticFeedback.selectionClick(); setState(() => _sekme = i); },
+          onTap: _git,
           backgroundColor: Colors.transparent,
           elevation: 0,
           type: BottomNavigationBarType.fixed,
           selectedItemColor: Renk.teal,
           unselectedItemColor: Renk.yaziSoluk,
-          selectedFontSize: 11,
-          unselectedFontSize: 11,
+          selectedFontSize: 10,
+          unselectedFontSize: 10,
           items: const [
-            BottomNavigationBarItem(icon: Icon(Icons.dashboard_outlined), label: "GENEL"),
-            BottomNavigationBarItem(icon: Icon(Icons.candlestick_chart_outlined), label: "GRAFIK"),
-            BottomNavigationBarItem(icon: Icon(Icons.list_alt_outlined), label: "POZISYON"),
-            BottomNavigationBarItem(icon: Icon(Icons.chat_bubble_outline), label: "MESAJ"),
+            BottomNavigationBarItem(icon: Icon(Icons.dashboard_outlined), label: "ANA SAYFA"),
+            BottomNavigationBarItem(icon: Icon(Icons.show_chart), label: "GRAFIK"),
+            BottomNavigationBarItem(icon: Icon(Icons.psychology_outlined), label: "AI ANALIZ"),
+            BottomNavigationBarItem(icon: Icon(Icons.forum_outlined), label: "MESAJ"),
           ],
         ),
       ),
@@ -442,649 +584,810 @@ class _AnaKabukState extends State<AnaKabuk> {
 }
 
 // ============================================================
-//  GENEL EKRANI (canli veri - panel.py'den)
+//  ANA SAYFA (DASHBOARD) - mockup'taki gibi
 // ============================================================
-class GenelEkrani extends StatefulWidget {
-  const GenelEkrani({super.key});
+class DashboardEkrani extends StatefulWidget {
+  final void Function(int)? onSekme;
+  const DashboardEkrani({super.key, this.onSekme});
   @override
-  State<GenelEkrani> createState() => _GenelEkraniState();
+  State<DashboardEkrani> createState() => _DashboardEkraniState();
 }
 
-class _GenelEkraniState extends State<GenelEkrani> {
+class _DashboardEkraniState extends State<DashboardEkrani> {
   final _servis = DurumServisi.instance;
+  List<double> _gecmis = [];
+  Map<String, dynamic>? _aiOzet;
+  bool _aiYukleniyor = true;
 
   @override
   void initState() {
     super.initState();
-    _servis.addListener(_guncelle);
+    _gecmisCek();
+    _aiCek();
   }
 
-  @override
-  void dispose() {
-    _servis.removeListener(_guncelle);
-    super.dispose();
+  Future<void> _gecmisCek() async {
+    final v = await _panel("/gecmis");
+    if (v is Map && v["noktalar"] is List) {
+      final n = (v["noktalar"] as List).map((e) => _d(e["v"])).toList();
+      if (mounted) setState(() => _gecmis = n);
+    }
   }
 
-  void _guncelle() {
-    if (mounted) setState(() {});
+  Future<void> _aiCek() async {
+    String coin = "BTCUSDT";
+    final poz = _servis.veri?["acik_pozisyon"];
+    if (poz is List && poz.isNotEmpty) {
+      coin = poz.first["sembol"]?.toString() ?? coin;
+    }
+    final v = await _panel("/analiz?coin=$coin");
+    if (mounted) {
+      setState(() {
+        _aiOzet = (v is Map) ? Map<String, dynamic>.from(v) : null;
+        _aiYukleniyor = false;
+      });
+    }
   }
 
-  // servisten kisayollar
-  Map<String, dynamic>? get _durum => _servis.veri;
-  bool get _ilkYukleme => _servis.ilkYukleme;
-  bool get _bagli => _servis.bagliMi;
+  Future<void> _yenile() async {
+    await _servis.elleYenile();
+    await _gecmisCek();
+    await _aiCek();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: RefreshIndicator(
-        color: Renk.teal,
-        backgroundColor: Renk.kart,
-        onRefresh: _servis.elleYenile,
-        child: _ilkYukleme
-          ? const Center(child: CircularProgressIndicator(color: Renk.teal))
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                _baslik(),
-                const SizedBox(height: 20),
-                if (!_bagli) _hataKarti(),
-                if (_durum != null) ..._icerik(),
-              ],
-            ),
+    return AnimatedBuilder(
+      animation: _servis,
+      builder: (context, _) {
+        final v = _servis.veri;
+        final aktif = (v?["bot_aktif"] == true);
+        final st = (v?["istatistik"] as Map?) ?? {};
+        final poz = (v?["acik_pozisyon"] as List?) ?? [];
+        return RefreshIndicator(
+          onRefresh: _yenile,
+          color: Renk.teal,
+          backgroundColor: Renk.kart,
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              _ustBar(context, aktif: aktif, cikis: () => _cikisYap(context)),
+              const SizedBox(height: 16),
+              _portfoyKart(v),
+              const SizedBox(height: 14),
+              _metrikGrid(v, st),
+              const SizedBox(height: 14),
+              _aiKart(),
+              const SizedBox(height: 16),
+              Text("AÇIK POZISYONLAR", style: _baslikStil),
+              const SizedBox(height: 10),
+              if (poz.isEmpty) _bosKutu("Şu an açık pozisyon yok"),
+              ...poz.map((p) => Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: _pozKart(Map<String, dynamic>.from(p)),
+                  )),
+              const SizedBox(height: 24),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _portfoyKart(Map<String, dynamic>? v) {
+    final bakiye = _d(v?["bakiye"]);
+    double yuzde = 0;
+    if (_gecmis.length >= 2 && _gecmis.first > 0) {
+      yuzde = (_gecmis.last - _gecmis.first) / _gecmis.first * 100;
+    }
+    return _kart(
+      cocuk: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Text("PORTFÖY GRAFİĞİ", style: _kucukBaslik),
+          const Spacer(),
+          Text("${yuzde >= 0 ? '+' : ''}${yuzde.toStringAsFixed(2)}%",
+              style: TextStyle(color: _pnlRenk(yuzde), fontWeight: FontWeight.w700, fontSize: 13)),
+        ]),
+        const SizedBox(height: 8),
+        Text(_para(bakiye),
+            style: const TextStyle(color: Renk.yazi, fontSize: 26, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 14),
+        SizedBox(
+          height: 120,
+          width: double.infinity,
+          child: _gecmis.length < 2
+              ? const Center(
+                  child: Text("Veri toplanıyor... (panel her 5 dk kaydeder)",
+                      style: TextStyle(color: Renk.yaziSoluk, fontSize: 12)))
+              : CustomPaint(painter: _CizgiPainter(_gecmis)),
+        ),
+      ]),
+    );
+  }
+
+  Widget _metrikGrid(Map<String, dynamic>? v, Map st) {
+    final bakiye = _d(v?["bakiye"]);
+    final pnl = _d(v?["acik_pnl"]);
+    final gunluk = _d(st["gunluk_pnl"]);
+    final acikSayi = (v?["acik_sayi"] ?? 0);
+    final isabet = _d(st["isabet_yuzde"]);
+    final pf = _d(st["profit_factor"]);
+    return Column(children: [
+      Row(children: [
+        Expanded(child: _metrikKart("BAKIYE", _para(bakiye), Icons.account_balance_wallet_outlined)),
+        const SizedBox(width: 12),
+        Expanded(child: _metrikKart("AÇIK PNL", _para(pnl, isaret: true), Icons.trending_up, renk: _pnlRenk(pnl))),
+      ]),
+      const SizedBox(height: 12),
+      Row(children: [
+        Expanded(child: _metrikKart("GÜNLÜK KAR", _para(gunluk, isaret: true), Icons.pie_chart_outline, renk: _pnlRenk(gunluk))),
+        const SizedBox(width: 12),
+        Expanded(child: _metrikKart("AÇIK POZİSYON", "$acikSayi / 4", Icons.schedule)),
+      ]),
+      const SizedBox(height: 12),
+      Row(children: [
+        Expanded(child: _metrikKart("İSABET ORANI", "%${isabet.toStringAsFixed(0)}", Icons.adjust, renk: Renk.altin)),
+        const SizedBox(width: 12),
+        Expanded(child: _metrikKart("PROFIT FACTOR", pf.toStringAsFixed(2), Icons.bar_chart, renk: pf >= 1 ? Renk.teal : Renk.kirmizi)),
+      ]),
+    ]);
+  }
+
+  Widget _metrikKart(String etiket, String deger, IconData ikon, {Color? renk}) {
+    return _kart(
+      ic: const EdgeInsets.all(14),
+      cocuk: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Expanded(child: Text(etiket, style: _kucukBaslik)),
+          Icon(ikon, color: Renk.yaziSoluk, size: 16),
+        ]),
+        const SizedBox(height: 10),
+        Text(deger, style: TextStyle(color: renk ?? Renk.yazi, fontSize: 20, fontWeight: FontWeight.w700)),
+      ]),
+    );
+  }
+
+  Widget _aiKart() {
+    return GestureDetector(
+      onTap: () => widget.onSekme?.call(2),
+      child: _kart(
+        cocuk: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.psychology, color: Renk.mavi, size: 18),
+            const SizedBox(width: 8),
+            const Text("AI PİYASA ANALİZİ",
+                style: TextStyle(color: Renk.mavi, fontWeight: FontWeight.w700, fontSize: 13)),
+            const Spacer(),
+            const Icon(Icons.chevron_right, color: Renk.yaziSoluk, size: 18),
+          ]),
+          const SizedBox(height: 14),
+          if (_aiYukleniyor)
+            Row(children: const [
+              SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Renk.mavi)),
+              SizedBox(width: 10),
+              Text("Hesaplanıyor...", style: TextStyle(color: Renk.yaziSoluk)),
+            ])
+          else if (_aiOzet == null || _aiOzet!["gostergeler"] == null)
+            const Text("Analiz alınamadı (panel/internet?)",
+                style: TextStyle(color: Renk.yaziSoluk, fontSize: 12))
+          else
+            _aiOzetIcerik(),
+        ]),
       ),
     );
   }
 
-  // --- Ust baslik (logo + AKINCI + canli rozet) ---
-  Widget _baslik() {
-    final aktif = _durum?['bot_aktif'] == true;
+  Widget _aiOzetIcerik() {
+    final coin = (_aiOzet!["coin"] ?? "").toString().replaceAll("USDT", "");
+    final trend = (_aiOzet!["trend"] ?? "—").toString();
+    final guven = (_aiOzet!["guven"] ?? 0);
+    final trendRenk = trend.contains("YUKSEL")
+        ? Renk.teal
+        : (trend.contains("DUSUS") ? Renk.kirmizi : Renk.altin);
     return Row(children: [
-      Container(
-        width: 44, height: 44,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(color: Renk.teal.withOpacity(0.2), blurRadius: 12, spreadRadius: 1),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(12),
-          child: Image.asset('logo.png', fit: BoxFit.cover),
-        ),
-      ),
-      const SizedBox(width: 12),
-      Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [
-        Text("AKINCI", style: TextStyle(color: Renk.yazi, fontSize: 18, fontWeight: FontWeight.w700, letterSpacing: 2)),
-        Text("KOMUTA MERKEZI", style: TextStyle(color: Renk.yaziSoluk, fontSize: 10, letterSpacing: 2)),
-      ]),
-      const Spacer(),
-      _rozet(aktif ? "CANLI" : "DURDU", aktif ? Renk.teal : Renk.kirmizi),
-      const SizedBox(width: 8),
-      // cikis yap butonu
-      GestureDetector(
-        onTap: _cikisYap,
-        behavior: HitTestBehavior.opaque,
-        child: Container(
-          width: 38, height: 38,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(10),
-            color: Renk.kartAcik,
-            border: Border.all(color: Renk.cizgi),
-          ),
-          child: Icon(Icons.logout, color: Renk.yaziSoluk, size: 18),
-        ),
+      _Halka(yuzde: (guven is num ? guven.toDouble() : 0) / 100, etiket: "$guven%", boyut: 64),
+      const SizedBox(width: 16),
+      Expanded(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text("$coin · $trend",
+              style: TextStyle(color: trendRenk, fontWeight: FontWeight.w700, fontSize: 15)),
+          const SizedBox(height: 4),
+          const Text("AI güven skoru — detay için dokun",
+              style: TextStyle(color: Renk.yaziSoluk, fontSize: 12)),
+        ]),
       ),
     ]);
   }
 
-  void _cikisYap() async {
-    HapticFeedback.mediumImpact();
-    final onay = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        backgroundColor: Renk.kart,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text("Cikis Yap", style: TextStyle(color: Renk.yazi, fontSize: 18, fontWeight: FontWeight.w700)),
-        content: const Text("Oturumu kapatmak istedigine emin misin?",
-            style: TextStyle(color: Renk.yaziSoluk, fontSize: 14)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(c, false),
-            child: const Text("Vazgec", style: TextStyle(color: Renk.yaziSoluk)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(c, true),
-            child: const Text("Cikis Yap", style: TextStyle(color: Renk.kirmizi, fontWeight: FontWeight.w600)),
-          ),
-        ],
-      ),
-    );
-    if (onay == true) {
-      // beni hatirla bilgisini sil
-      try {
-        final p = await SharedPreferences.getInstance();
-        await p.setBool('beni_hatirla', false);
-        await p.remove('sifre');
-      } catch (_) {}
-      // veri servisini durdur
-      DurumServisi.instance.durdur();
-      if (!mounted) return;
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const GirisEkrani()),
-      );
+  Widget _pozKart(Map<String, dynamic> p) {
+    final yon = (p["yon"] ?? "").toString();
+    final long = yon == "LONG";
+    final sembol = (p["sembol"] ?? "").toString();
+    final giris = _d(p["giris"]);
+    final mark = _d(p["mark"]);
+    final stop = _d(p["stop"]);
+    final hedef = _d(p["hedef"]);
+    final pnl = _d(p["pnl"]);
+    final yuzde = _d(p["yuzde"]);
+    final kald = p["kaldirac"];
+    double ilerleme = 0;
+    if (long && hedef != giris) {
+      ilerleme = (mark - giris) / (hedef - giris);
+    } else if (!long && giris != hedef) {
+      ilerleme = (giris - mark) / (giris - hedef);
     }
-  }
-
-  Widget _rozet(String yazi, Color renk) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: renk.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: renk.withOpacity(0.4)),
-      ),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Container(width: 7, height: 7, decoration: BoxDecoration(color: renk, shape: BoxShape.circle)),
-        const SizedBox(width: 6),
-        Text(yazi, style: TextStyle(color: renk, fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 1)),
-      ]),
-    );
-  }
-
-  Widget _hataKarti() {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Renk.kirmizi.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Renk.kirmizi.withOpacity(0.3)),
-      ),
-      child: Row(children: [
-        const Icon(Icons.wifi_off, color: Renk.kirmizi, size: 20),
-        const SizedBox(width: 12),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text("Panele baglanilamadi", style: TextStyle(color: Renk.kirmizi, fontSize: 14, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 2),
-          Text("panel.py calisiyor mu? (Termux'ta python panel.py)",
-            style: TextStyle(color: Renk.yaziSoluk, fontSize: 12)),
-        ])),
-      ]),
-    );
-  }
-
-  List<Widget> _icerik() {
-    final d = _durum!;
-    final bakiye = (d['bakiye'] ?? 0).toDouble();
-    final acikPnl = (d['acik_pnl'] ?? 0).toDouble();
-    final pozlar = (d['acik_pozisyon'] ?? []) as List;
-    final ist = d['istatistik'] ?? {};
-    final isabet = (ist['isabet_yuzde'] ?? 0).toDouble();
-    final acikSayi = d['acik_sayi'] ?? 0;
-
-    return [
-      // --- Bakiye + PNL satiri ---
-      Row(children: [
-        Expanded(child: _kutu("BAKIYE", "\$${_vir(bakiye)}", Renk.yazi, altYazi: "canli")),
-        const SizedBox(width: 12),
-        Expanded(child: _kutu("ACIK PNL", "${acikPnl >= 0 ? '+' : ''}\$${_vir(acikPnl)}",
-          acikPnl >= 0 ? Renk.teal : Renk.kirmizi)),
-      ]),
-      const SizedBox(height: 12),
-      // --- Acik pozisyon + isabet ---
-      Row(children: [
-        Expanded(child: _kutu("ACIK POZISYON", "$acikSayi / 4", Renk.yazi)),
-        const SizedBox(width: 12),
-        Expanded(child: _kutu("ISABET ORANI", "%${isabet.toStringAsFixed(0)}",
-          isabet >= 50 ? Renk.teal : Renk.altin)),
-      ]),
-      const SizedBox(height: 20),
-      // --- Acik pozisyonlar listesi ---
-      _bolumBaslik("ACIK POZISYONLAR"),
-      const SizedBox(height: 10),
-      if (pozlar.isEmpty)
-        _bosPozisyon()
-      else
-        ...pozlar.map((p) => _pozisyonKarti(p)).toList(),
-      const SizedBox(height: 20),
-      // --- Kontrol butonlari ---
-      _bolumBaslik("KONTROL"),
-      const SizedBox(height: 10),
-      _kontrolButonu("OPERASYONU DURDUR", Icons.pause_circle_outline, Renk.altin, _durdurOnay),
-      const SizedBox(height: 10),
-      _kontrolButonu("ACIL TAHLIYE", Icons.warning_amber_rounded, Renk.kirmizi, _acilOnay),
-      const SizedBox(height: 20),
-    ];
-  }
-
-  Widget _kutu(String etiket, String deger, Color renk, {String? altYazi}) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Renk.kart,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Renk.cizgi),
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(etiket, style: const TextStyle(color: Renk.yaziSoluk, fontSize: 11, letterSpacing: 1, fontWeight: FontWeight.w500)),
-        const SizedBox(height: 8),
-        Text(deger, style: TextStyle(color: renk, fontSize: 22, fontWeight: FontWeight.w700)),
-        if (altYazi != null) ...[
-          const SizedBox(height: 2),
-          Text(altYazi, style: const TextStyle(color: Renk.yaziSoluk, fontSize: 10)),
-        ],
-      ]),
-    );
-  }
-
-  Widget _bolumBaslik(String yazi) {
-    return Text(yazi, style: const TextStyle(color: Renk.yaziSoluk, fontSize: 12, letterSpacing: 2, fontWeight: FontWeight.w600));
-  }
-
-  Widget _bosPozisyon() {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Renk.kart,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Renk.cizgi),
-      ),
-      child: Column(children: [
-        Icon(Icons.inbox_outlined, color: Renk.yaziSoluk.withOpacity(0.5), size: 36),
-        const SizedBox(height: 10),
-        Text("Acik pozisyon yok", style: TextStyle(color: Renk.yaziSoluk, fontSize: 14)),
-        const SizedBox(height: 4),
-        Text("Bot uygun sinyal bekliyor", style: TextStyle(color: Renk.yaziSoluk.withOpacity(0.6), fontSize: 12)),
-      ]),
-    );
-  }
-
-  Widget _pozisyonKarti(dynamic p) {
-    final yon = p['yon'] ?? '?';
-    final long = yon == 'LONG';
-    final pnl = (p['pnl'] ?? 0).toDouble();
-    final yuzde = (p['yuzde'] ?? 0).toDouble();
-    final karda = pnl >= 0;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Renk.kart,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: (karda ? Renk.teal : Renk.kirmizi).withOpacity(0.25)),
-      ),
-      child: Column(children: [
+    ilerleme = ilerleme.clamp(0.0, 1.0);
+    final yonRenk = long ? Renk.teal : Renk.kirmizi;
+    return _kart(
+      cocuk: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          // yon rozeti
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(
-              color: (long ? Renk.teal : Renk.kirmizi).withOpacity(0.15),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Text(yon, style: TextStyle(color: long ? Renk.teal : Renk.kirmizi, fontSize: 11, fontWeight: FontWeight.w700)),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(color: yonRenk.withOpacity(0.15), borderRadius: BorderRadius.circular(6)),
+            child: Text(yon, style: TextStyle(color: yonRenk, fontWeight: FontWeight.w700, fontSize: 11)),
           ),
           const SizedBox(width: 10),
-          Text(p['sembol'] ?? '', style: const TextStyle(color: Renk.yazi, fontSize: 15, fontWeight: FontWeight.w600)),
+          Text(sembol, style: const TextStyle(color: Renk.yazi, fontWeight: FontWeight.w700, fontSize: 15)),
           const Spacer(),
           Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-            Text("${karda ? '+' : ''}\$${_vir(pnl)}",
-              style: TextStyle(color: karda ? Renk.teal : Renk.kirmizi, fontSize: 15, fontWeight: FontWeight.w700)),
-            Text("${karda ? '+' : ''}${yuzde.toStringAsFixed(2)}%",
-              style: TextStyle(color: karda ? Renk.teal : Renk.kirmizi, fontSize: 11)),
+            Text(_para(pnl, isaret: true),
+                style: TextStyle(color: _pnlRenk(pnl), fontWeight: FontWeight.w700, fontSize: 15)),
+            Text("${yuzde >= 0 ? '+' : ''}${yuzde.toStringAsFixed(2)}%",
+                style: TextStyle(color: _pnlRenk(pnl), fontSize: 11)),
           ]),
         ]),
         const SizedBox(height: 12),
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          _pozBilgi("Giris", "\$${p['giris']}"),
-          _pozBilgi("Mark", "\$${p['mark']}"),
-          _pozBilgi("Stop", "\$${p['stop']}"),
+        Row(children: [
+          _kv("GİRİŞ", "$giris"),
+          _kv("GÜNCEL", "$mark"),
+          _kv("TP", "$hedef"),
+          _kv("SL", "$stop"),
+        ]),
+        const SizedBox(height: 12),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: LinearProgressIndicator(
+              value: ilerleme, minHeight: 6, backgroundColor: Renk.kartAcik, color: yonRenk),
+        ),
+        const SizedBox(height: 6),
+        Row(children: [
+          Text("${(ilerleme * 100).toStringAsFixed(0)}% hedefe",
+              style: const TextStyle(color: Renk.yaziSoluk, fontSize: 11)),
+          const Spacer(),
+          if (kald != null && kald != 0)
+            Text("${kald}x", style: const TextStyle(color: Renk.altin, fontSize: 11, fontWeight: FontWeight.w700)),
         ]),
       ]),
     );
   }
 
-  Widget _pozBilgi(String etiket, String deger) {
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(etiket, style: const TextStyle(color: Renk.yaziSoluk, fontSize: 10)),
-      const SizedBox(height: 2),
-      Text(deger, style: const TextStyle(color: Renk.yazi, fontSize: 13, fontWeight: FontWeight.w500)),
-    ]);
-  }
-
-  Widget _kontrolButonu(String yazi, IconData ikon, Color renk, VoidCallback onTap) {
-    return SizedBox(
-      width: double.infinity, height: 52,
-      child: OutlinedButton.icon(
-        onPressed: onTap,
-        icon: Icon(ikon, color: renk, size: 20),
-        label: Text(yazi, style: TextStyle(color: renk, fontSize: 14, fontWeight: FontWeight.w600, letterSpacing: 1)),
-        style: OutlinedButton.styleFrom(
-          backgroundColor: renk.withOpacity(0.06),
-          side: BorderSide(color: renk.withOpacity(0.3)),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        ),
-      ),
-    );
-  }
-
-  // --- Onaylar (su an sadece uyari; gercek dur/kapat bekci.py ile sonra) ---
-  void _durdurOnay() {
-    HapticFeedback.mediumImpact();
-    _onayDialog(
-      "Operasyonu Durdur",
-      "Bot yeni islem acmayi durduracak. Acik pozisyonlar devam eder. Emin misin?",
-      Renk.altin,
-      () {
-        Navigator.pop(context);
-        _bilgiMesaji("Bu ozellik yakinda (bekci.py baglaninca)");
-      },
-    );
-  }
-
-  void _acilOnay() {
-    HapticFeedback.heavyImpact();
-    _onayDialog(
-      "ACIL TAHLIYE",
-      "TUM acik pozisyonlar PIYASA fiyatindan KAPATILACAK. Bu islem geri alinamaz. Emin misin?",
-      Renk.kirmizi,
-      () {
-        Navigator.pop(context);
-        _bilgiMesaji("Bu ozellik yakinda (bekci.py baglaninca)");
-      },
-    );
-  }
-
-  void _onayDialog(String baslik, String mesaj, Color renk, VoidCallback onay) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: Renk.kart,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(baslik, style: TextStyle(color: renk, fontWeight: FontWeight.w700)),
-        content: Text(mesaj, style: const TextStyle(color: Renk.yazi, fontSize: 14, height: 1.4)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context),
-            child: const Text("Vazgec", style: TextStyle(color: Renk.yaziSoluk))),
-          ElevatedButton(onPressed: onay,
-            style: ElevatedButton.styleFrom(backgroundColor: renk, foregroundColor: Renk.arkaplan),
-            child: const Text("Onayla", style: TextStyle(fontWeight: FontWeight.w700))),
-        ],
-      ),
-    );
-  }
-
-  void _bilgiMesaji(String mesaj) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(mesaj),
-      backgroundColor: Renk.kartAcik,
-      behavior: SnackBarBehavior.floating,
-    ));
-  }
-
-  // binliklere virgul (basit)
-  String _vir(double sayi) {
-    final s = sayi.abs().toStringAsFixed(2);
-    final parcalar = s.split('.');
-    final tamKisim = parcalar[0];
-    final ondalik = parcalar[1];
-    final tampon = StringBuffer();
-    for (int i = 0; i < tamKisim.length; i++) {
-      if (i > 0 && (tamKisim.length - i) % 3 == 0) tampon.write(',');
-      tampon.write(tamKisim[i]);
-    }
-    return "$tampon.$ondalik";
-  }
-}
-
-// ============================================================
-//  YAKINDA EKRANI (Grafik/Pozisyon/Mesaj - v1'de bos)
-// ============================================================
-class _YakindaEkrani extends StatelessWidget {
-  final String baslik;
-  const _YakindaEkrani({required this.baslik});
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: Center(
-        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Icon(Icons.construction_outlined, color: Renk.yaziSoluk.withOpacity(0.4), size: 56),
-          const SizedBox(height: 16),
-          Text(baslik, style: const TextStyle(color: Renk.yazi, fontSize: 18, fontWeight: FontWeight.w600, letterSpacing: 2)),
-          const SizedBox(height: 8),
-          Text("yakinda", style: TextStyle(color: Renk.yaziSoluk, fontSize: 14)),
+  Widget _kv(String k, String v) => Expanded(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(k, style: const TextStyle(color: Renk.yaziSoluk, fontSize: 10)),
+          const SizedBox(height: 2),
+          Text(v, style: const TextStyle(color: Renk.yazi, fontSize: 12, fontWeight: FontWeight.w600)),
         ]),
-      ),
-    );
-  }
+      );
 }
 
 // ============================================================
-//  POZISYON EKRANI - acik pozisyonlarin detayli listesi
-//  panel.py /durum'dan acik_pozisyon listesini ceker (5sn'de bir),
-//  her pozisyonu zengin bir kartta gosterir: yon, giris, mark, stop,
-//  hedef, kaldirac, senaryo, kar/zarar + stop'a ve hedefe uzaklik %.
+//  GRAFIK EKRANI - mum grafigi (kendi cizici) + destek/direnc
 // ============================================================
-class PozisyonEkrani extends StatefulWidget {
-  const PozisyonEkrani({super.key});
+class GrafikEkrani extends StatefulWidget {
+  const GrafikEkrani({super.key});
   @override
-  State<PozisyonEkrani> createState() => _PozisyonEkraniState();
+  State<GrafikEkrani> createState() => _GrafikEkraniState();
 }
 
-class _PozisyonEkraniState extends State<PozisyonEkrani> {
-  final _servis = DurumServisi.instance;
+class _GrafikEkraniState extends State<GrafikEkrani> {
+  final _coinler = const ["TON", "ETH", "SOL", "XRP", "DOGE", "LINK"];
+  String _coin = "ETH";
+  bool _yukleniyor = true;
+  List<Map<String, dynamic>> _mumlar = [];
+  List<Map<String, dynamic>> _seviyeler = [];
 
   @override
   void initState() {
     super.initState();
-    _servis.addListener(_guncelle);
+    _cek();
+  }
+
+  Future<void> _cek() async {
+    setState(() => _yukleniyor = true);
+    final v = await _panel("/mum?coin=${_coin}USDT&aralik=15m");
+    if (!mounted) return;
+    if (v is Map) {
+      _mumlar = ((v["mumlar"] as List?) ?? []).map((e) => Map<String, dynamic>.from(e)).toList();
+      _seviyeler = ((v["seviyeler"] as List?) ?? []).map((e) => Map<String, dynamic>.from(e)).toList();
+    } else {
+      _mumlar = [];
+      _seviyeler = [];
+    }
+    setState(() => _yukleniyor = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(padding: const EdgeInsets.all(16), children: [
+      Text("CANLI GRAFİK", style: _baslikStil),
+      const SizedBox(height: 12),
+      _coinSecici(_coinler, _coin, (c) {
+        setState(() => _coin = c);
+        _cek();
+      }),
+      const SizedBox(height: 16),
+      _kart(
+        cocuk: SizedBox(
+          height: 340,
+          child: _yukleniyor
+              ? const Center(child: CircularProgressIndicator(color: Renk.teal))
+              : _mumlar.length < 2
+                  ? const Center(child: Text("Veri alınamadı", style: TextStyle(color: Renk.yaziSoluk)))
+                  : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Row(children: [
+                        Text("${_coin}USDT",
+                            style: const TextStyle(color: Renk.yazi, fontWeight: FontWeight.w700, fontSize: 16)),
+                        const SizedBox(width: 8),
+                        const Text("15dk", style: TextStyle(color: Renk.yaziSoluk, fontSize: 12)),
+                        const Spacer(),
+                        Text(_d(_mumlar.last["c"]).toString(),
+                            style: const TextStyle(color: Renk.teal, fontWeight: FontWeight.w700)),
+                      ]),
+                      const SizedBox(height: 12),
+                      Expanded(
+                        child: CustomPaint(
+                          size: const Size(double.infinity, double.infinity),
+                          painter: _MumPainter(_mumlar, _seviyeler),
+                        ),
+                      ),
+                    ]),
+        ),
+      ),
+      const SizedBox(height: 12),
+      const Text("Sarı kesik çizgiler: canlı destek/direnç (By Murat)",
+          style: TextStyle(color: Renk.yaziSoluk, fontSize: 12)),
+      const SizedBox(height: 24),
+    ]);
+  }
+}
+
+// ============================================================
+//  AI ANALIZ EKRANI - gercek gostergeler + guven + bot sinyali
+// ============================================================
+class AIAnalizEkrani extends StatefulWidget {
+  const AIAnalizEkrani({super.key});
+  @override
+  State<AIAnalizEkrani> createState() => _AIAnalizEkraniState();
+}
+
+class _AIAnalizEkraniState extends State<AIAnalizEkrani> {
+  final _coinler = const ["TON", "ETH", "SOL", "XRP", "DOGE", "LINK"];
+  String _coin = "ETH";
+  bool _yukleniyor = true;
+  Map<String, dynamic>? _veri;
+
+  @override
+  void initState() {
+    super.initState();
+    _cek();
+  }
+
+  Future<void> _cek() async {
+    setState(() => _yukleniyor = true);
+    final v = await _panel("/analiz?coin=${_coin}USDT");
+    if (!mounted) return;
+    setState(() {
+      _veri = (v is Map) ? Map<String, dynamic>.from(v) : null;
+      _yukleniyor = false;
+    });
+  }
+
+  Color _sinyalRenk(String s) {
+    if (s == "AL" || s.contains("SATIM") || s == "GUCLU TREND" || s == "GUCLU") return Renk.teal;
+    if (s == "SAT" || s.contains("ALIM")) return Renk.kirmizi;
+    return Renk.yaziSoluk;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(padding: const EdgeInsets.all(16), children: [
+      Text("AI PİYASA ANALİZİ", style: _baslikStil),
+      const SizedBox(height: 12),
+      _coinSecici(_coinler, _coin, (c) {
+        setState(() => _coin = c);
+        _cek();
+      }),
+      const SizedBox(height: 16),
+      if (_yukleniyor)
+        const Padding(padding: EdgeInsets.all(40), child: Center(child: CircularProgressIndicator(color: Renk.mavi)))
+      else if (_veri == null)
+        _bosKutu("Analiz alınamadı (panel/internet?)")
+      else
+        ..._icerik(),
+      const SizedBox(height: 24),
+    ]);
+  }
+
+  List<Widget> _icerik() {
+    final trend = (_veri!["trend"] ?? "—").toString();
+    final guven = (_veri!["guven"] ?? 0);
+    final gost = (_veri!["gostergeler"] as List?) ?? [];
+    final bot = (_veri!["bot_sinyali"] as Map?) ?? {};
+    final trendRenk = trend.contains("YUKSEL")
+        ? Renk.teal
+        : (trend.contains("DUSUS") ? Renk.kirmizi : Renk.altin);
+    return [
+      _kart(
+        cocuk: Row(children: [
+          _Halka(yuzde: (guven is num ? guven.toDouble() : 0) / 100, etiket: "$guven%", boyut: 92),
+          const SizedBox(width: 18),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text("${_coin}USDT",
+                  style: const TextStyle(color: Renk.yazi, fontWeight: FontWeight.w700, fontSize: 16)),
+              const SizedBox(height: 4),
+              Text(_d(_veri!["fiyat"]).toString(), style: const TextStyle(color: Renk.yaziSoluk, fontSize: 13)),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(color: trendRenk.withOpacity(0.15), borderRadius: BorderRadius.circular(8)),
+                child: Text(trend, style: TextStyle(color: trendRenk, fontWeight: FontWeight.w700)),
+              ),
+            ]),
+          ),
+        ]),
+      ),
+      const SizedBox(height: 16),
+      const Text("GÖSTERGELER", style: _kucukBaslik),
+      const SizedBox(height: 8),
+      ...gost.map((g) {
+        final m = Map<String, dynamic>.from(g);
+        final s = (m["sinyal"] ?? "").toString();
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: _kart(
+            ic: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            cocuk: Row(children: [
+              Text(m["ad"].toString(), style: const TextStyle(color: Renk.yazi, fontWeight: FontWeight.w600)),
+              const Spacer(),
+              Text(m["deger"].toString(), style: const TextStyle(color: Renk.yazi, fontSize: 13)),
+              const SizedBox(width: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(color: _sinyalRenk(s).withOpacity(0.15), borderRadius: BorderRadius.circular(6)),
+                child: Text(s, style: TextStyle(color: _sinyalRenk(s), fontSize: 11, fontWeight: FontWeight.w700)),
+              ),
+            ]),
+          ),
+        );
+      }),
+      const SizedBox(height: 16),
+      const Text("BOTUN SİNYALİ (destek/direnç)", style: _kucukBaslik),
+      const SizedBox(height: 8),
+      _kart(
+        cocuk: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.smart_toy_outlined, color: Renk.mavi, size: 18),
+            const SizedBox(width: 8),
+            Text(bot["yon"]?.toString() ?? "BEKLE",
+                style: TextStyle(
+                    color: bot["yon"] != null ? Renk.teal : Renk.yaziSoluk, fontWeight: FontWeight.w700)),
+            const Spacer(),
+            if (bot["rr"] != null)
+              Text("RR ${bot["rr"]}", style: const TextStyle(color: Renk.altin, fontSize: 12)),
+          ]),
+          const SizedBox(height: 8),
+          Text(bot["sebep"]?.toString() ?? "-", style: const TextStyle(color: Renk.yaziSoluk, fontSize: 13)),
+        ]),
+      ),
+    ];
+  }
+}
+
+// ============================================================
+//  MESAJ EKRANI - asistanla sohbet (/sor)
+// ============================================================
+class _Mesaj {
+  final String metin;
+  final bool benim;
+  _Mesaj(this.metin, this.benim);
+}
+
+class MesajEkrani extends StatefulWidget {
+  const MesajEkrani({super.key});
+  @override
+  State<MesajEkrani> createState() => _MesajEkraniState();
+}
+
+class _MesajEkraniState extends State<MesajEkrani> {
+  final _girdi = TextEditingController();
+  final _kaydir = ScrollController();
+  final List<_Mesaj> _mesajlar = [];
+  bool _bekliyor = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _mesajlar.add(_Mesaj(
+        "Selam! 🦅 Akıncı asistanındayım. Durum, bakiye, pozisyonlar, \"ETH neden açıldı\", \"RR ne demek\" gibi sorabilirsin.",
+        false));
   }
 
   @override
   void dispose() {
-    _servis.removeListener(_guncelle);
+    _girdi.dispose();
+    _kaydir.dispose();
     super.dispose();
   }
 
-  void _guncelle() {
-    if (mounted) setState(() {});
+  Future<void> _gonder() async {
+    final s = _girdi.text.trim();
+    if (s.isEmpty || _bekliyor) return;
+    setState(() {
+      _mesajlar.add(_Mesaj(s, true));
+      _bekliyor = true;
+      _girdi.clear();
+    });
+    _altaKay();
+    final v = await _panel("/sor?soru=${Uri.encodeComponent(s)}");
+    String cevap = "Asistana ulaşılamadı (panel açık mı?)";
+    if (v is Map && v["cevap"] != null) cevap = v["cevap"].toString();
+    if (!mounted) return;
+    setState(() {
+      _mesajlar.add(_Mesaj(cevap, false));
+      _bekliyor = false;
+    });
+    _altaKay();
   }
 
-  // servisten kisayollar
-  List<dynamic> get _pozlar => (_servis.veri?['acik_pozisyon'] as List?) ?? [];
-  bool get _yukleniyor => _servis.ilkYukleme;
-  bool get _hata => !_servis.bagliMi && _servis.veri == null;
+  void _altaKay() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_kaydir.hasClients) {
+        _kaydir.animateTo(_kaydir.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: Column(children: [
-        // baslik
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-          child: Row(children: [
-            const Text("ACIK POZISYONLAR",
-                style: TextStyle(color: Renk.yazi, fontSize: 18, fontWeight: FontWeight.w700, letterSpacing: 1)),
-            const Spacer(),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: Renk.teal.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text("${_pozlar.length} / 4",
-                  style: const TextStyle(color: Renk.teal, fontSize: 13, fontWeight: FontWeight.w700)),
-            ),
-          ]),
-        ),
-        Expanded(
-          child: _yukleniyor
-              ? const Center(child: CircularProgressIndicator(color: Renk.teal))
-              : _hata
-                  ? _hataKutu()
-                  : _pozlar.isEmpty
-                      ? _bosKutu()
-                      : RefreshIndicator(
-                          color: Renk.teal,
-                          backgroundColor: Renk.kart,
-                          onRefresh: _servis.elleYenile,
-                          child: ListView.builder(
-                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
-                            itemCount: _pozlar.length,
-                            itemBuilder: (c, i) => _pozKarti(_pozlar[i]),
-                          ),
-                        ),
-        ),
-      ]),
-    );
-  }
-
-  Widget _pozKarti(dynamic p) {
-    final yon = (p['yon'] ?? '?').toString();
-    final long = yon == 'LONG';
-    final pnl = (p['pnl'] ?? 0).toDouble();
-    final yuzde = (p['yuzde'] ?? 0).toDouble();
-    final karda = pnl >= 0;
-    final renk = long ? Renk.teal : Renk.kirmizi;
-    final pnlRenk = karda ? Renk.teal : Renk.kirmizi;
-
-    final giris = (p['giris'] ?? 0).toDouble();
-    final mark = (p['mark'] ?? 0).toDouble();
-    final stop = (p['stop'] ?? 0).toDouble();
-    final hedef = (p['hedef'] ?? 0).toDouble();
-    final kaldirac = p['kaldirac'];
-    final senaryo = (p['senaryo'] ?? '').toString();
-
-    // stop'a ve hedefe uzaklik % (mark'a gore)
-    String stopUz = "-";
-    String hedefUz = "-";
-    if (mark > 0 && stop > 0) {
-      stopUz = "${((stop - mark) / mark * 100).abs().toStringAsFixed(2)}%";
-    }
-    if (mark > 0 && hedef > 0) {
-      hedefUz = "${((hedef - mark) / mark * 100).abs().toStringAsFixed(2)}%";
-    }
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: Renk.kart,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: renk.withOpacity(0.3)),
+    return Column(children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+        child: Row(children: [
+          Text("ASİSTAN", style: _baslikStil),
+          const SizedBox(width: 8),
+          Container(width: 8, height: 8, decoration: const BoxDecoration(color: Renk.teal, shape: BoxShape.circle)),
+          const Spacer(),
+          const Text("kural-bazlı", style: TextStyle(color: Renk.yaziSoluk, fontSize: 11)),
+        ]),
       ),
-      child: Column(children: [
-        // ust satir: yon + sembol + pnl
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-              decoration: BoxDecoration(
-                color: renk.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(7),
-              ),
-              child: Row(children: [
-                Icon(long ? Icons.trending_up : Icons.trending_down, color: renk, size: 14),
-                const SizedBox(width: 4),
-                Text(yon, style: TextStyle(color: renk, fontSize: 12, fontWeight: FontWeight.w700)),
-              ]),
-            ),
-            const SizedBox(width: 10),
-            Text(p['sembol'] ?? '', style: const TextStyle(color: Renk.yazi, fontSize: 16, fontWeight: FontWeight.w700)),
-            if (kaldirac != null && kaldirac != 0) ...[
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Renk.yaziSoluk.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(5),
-                ),
-                child: Text("${kaldirac}x", style: const TextStyle(color: Renk.yaziSoluk, fontSize: 11, fontWeight: FontWeight.w600)),
-              ),
-            ],
-            const Spacer(),
-            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-              Text("${karda ? '+' : ''}\$${_v(pnl)}",
-                  style: TextStyle(color: pnlRenk, fontSize: 17, fontWeight: FontWeight.w700)),
-              Text("${karda ? '+' : ''}${yuzde.toStringAsFixed(2)}%",
-                  style: TextStyle(color: pnlRenk, fontSize: 12, fontWeight: FontWeight.w500)),
-            ]),
-          ]),
+      Expanded(
+        child: ListView.builder(
+          controller: _kaydir,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          itemCount: _mesajlar.length + (_bekliyor ? 1 : 0),
+          itemBuilder: (c, i) {
+            if (i == _mesajlar.length) return _balon(_Mesaj("yazıyor...", false));
+            return _balon(_mesajlar[i]);
+          },
         ),
-        Divider(color: Renk.cizgi, height: 1),
-        // alt: fiyat detaylari
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(children: [
-            Row(children: [
-              Expanded(child: _bilgi("GIRIS", "\$${_f(giris)}", Renk.yazi)),
-              Expanded(child: _bilgi("ANLIK", "\$${_f(mark)}", karda ? Renk.teal : Renk.kirmizi)),
-            ]),
-            const SizedBox(height: 14),
-            Row(children: [
-              Expanded(child: _bilgi("STOP", "\$${_f(stop)}", Renk.kirmizi, alt: "uzaklik $stopUz")),
-              Expanded(child: _bilgi("HEDEF", hedef > 0 ? "\$${_f(hedef)}" : "trailing", Renk.altin, alt: hedef > 0 ? "uzaklik $hedefUz" : "tepe takip")),
-            ]),
-            if (senaryo.isNotEmpty) ...[
-              const SizedBox(height: 14),
-              Row(children: [
-                Icon(Icons.bookmark_outline, color: Renk.yaziSoluk, size: 14),
-                const SizedBox(width: 6),
-                Text("Senaryo: ", style: TextStyle(color: Renk.yaziSoluk, fontSize: 12)),
-                Text(senaryo, style: const TextStyle(color: Renk.mavi, fontSize: 12, fontWeight: FontWeight.w600)),
-              ]),
-            ],
-          ]),
+      ),
+      _girisAlani(),
+    ]);
+  }
+
+  Widget _balon(_Mesaj m) {
+    return Align(
+      alignment: m.benim ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 5),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
+        decoration: BoxDecoration(
+          color: m.benim ? Renk.teal.withOpacity(0.15) : Renk.kart,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: m.benim ? Renk.teal.withOpacity(0.4) : Renk.cizgi),
         ),
-      ]),
+        child: Text(m.metin, style: const TextStyle(color: Renk.yazi, fontSize: 14, height: 1.35)),
+      ),
     );
   }
 
-  Widget _bilgi(String etiket, String deger, Color renk, {String? alt}) {
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(etiket, style: const TextStyle(color: Renk.yaziSoluk, fontSize: 10, letterSpacing: 0.5)),
-      const SizedBox(height: 3),
-      Text(deger, style: TextStyle(color: renk, fontSize: 15, fontWeight: FontWeight.w700)),
-      if (alt != null) ...[
-        const SizedBox(height: 2),
-        Text(alt, style: TextStyle(color: Renk.yaziSoluk.withOpacity(0.7), fontSize: 10)),
-      ],
-    ]);
-  }
-
-  Widget _bosKutu() {
-    return ListView(children: [
-      const SizedBox(height: 80),
-      Icon(Icons.inbox_outlined, color: Renk.yaziSoluk.withOpacity(0.4), size: 56),
-      const SizedBox(height: 16),
-      const Center(child: Text("Acik pozisyon yok", style: TextStyle(color: Renk.yazi, fontSize: 16, fontWeight: FontWeight.w600))),
-      const SizedBox(height: 6),
-      Center(child: Text("Bot uygun sinyal bekliyor", style: TextStyle(color: Renk.yaziSoluk, fontSize: 13))),
-    ]);
-  }
-
-  Widget _hataKutu() {
-    return ListView(children: [
-      const SizedBox(height: 80),
-      Icon(Icons.cloud_off_outlined, color: Renk.kirmizi.withOpacity(0.5), size: 56),
-      const SizedBox(height: 16),
-      const Center(child: Text("Panele baglanilamadi", style: TextStyle(color: Renk.yazi, fontSize: 16, fontWeight: FontWeight.w600))),
-      const SizedBox(height: 6),
-      Center(child: Text("panel.py calisiyor mu?", style: TextStyle(color: Renk.yaziSoluk, fontSize: 13))),
-    ]);
-  }
-
-  // sayi bicimleme
-  String _v(double x) => x.toStringAsFixed(2);
-  String _f(double x) {
-    if (x >= 100) return x.toStringAsFixed(2);
-    if (x >= 1) return x.toStringAsFixed(4);
-    return x.toStringAsFixed(6);
+  Widget _girisAlani() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+      decoration: const BoxDecoration(color: Renk.kart, border: Border(top: BorderSide(color: Renk.cizgi))),
+      child: Row(children: [
+        Expanded(
+          child: TextField(
+            controller: _girdi,
+            style: const TextStyle(color: Renk.yazi),
+            minLines: 1,
+            maxLines: 4,
+            textInputAction: TextInputAction.send,
+            onSubmitted: (_) => _gonder(),
+            decoration: InputDecoration(
+              hintText: "Bir şey sor...",
+              hintStyle: const TextStyle(color: Renk.yaziSoluk),
+              filled: true,
+              fillColor: Renk.arkaplan,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        GestureDetector(
+          onTap: _gonder,
+          child: Container(
+            width: 46,
+            height: 46,
+            decoration: const BoxDecoration(color: Renk.teal, shape: BoxShape.circle),
+            child: Icon(_bekliyor ? Icons.hourglass_top : Icons.send, color: Renk.arkaplan, size: 20),
+          ),
+        ),
+      ]),
+    );
   }
 }
 
+// ============================================================
+//  CIZICILER (CustomPainter) - portfoy cizgisi, mum, guven halkasi
+// ============================================================
+class _CizgiPainter extends CustomPainter {
+  final List<double> veri;
+  _CizgiPainter(this.veri);
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (veri.length < 2) return;
+    final mn = veri.reduce(math.min);
+    final mx = veri.reduce(math.max);
+    final aralik = (mx - mn).abs() < 1e-9 ? 1.0 : (mx - mn);
+    final dx = size.width / (veri.length - 1);
+    final yol = Path();
+    final dolu = Path();
+    for (int i = 0; i < veri.length; i++) {
+      final x = dx * i;
+      final y = size.height - ((veri[i] - mn) / aralik) * size.height;
+      if (i == 0) {
+        yol.moveTo(x, y);
+        dolu.moveTo(x, size.height);
+        dolu.lineTo(x, y);
+      } else {
+        yol.lineTo(x, y);
+        dolu.lineTo(x, y);
+      }
+    }
+    dolu.lineTo(size.width, size.height);
+    dolu.close();
+    final renk = veri.last >= veri.first ? Renk.teal : Renk.kirmizi;
+    canvas.drawPath(
+      dolu,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [renk.withOpacity(0.25), renk.withOpacity(0.0)],
+        ).createShader(Rect.fromLTWH(0, 0, size.width, size.height)),
+    );
+    canvas.drawPath(
+      yol,
+      Paint()
+        ..color = renk
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2
+        ..strokeJoin = StrokeJoin.round,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _CizgiPainter o) => o.veri != veri;
+}
+
+class _MumPainter extends CustomPainter {
+  final List<Map<String, dynamic>> mumlar;
+  final List<Map<String, dynamic>> seviyeler;
+  _MumPainter(this.mumlar, this.seviyeler);
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (mumlar.isEmpty) return;
+    double mn = double.infinity, mx = -double.infinity;
+    for (final m in mumlar) {
+      final h = _d(m["h"]);
+      final l = _d(m["l"]);
+      if (h > mx) mx = h;
+      if (l < mn) mn = l;
+    }
+    final aralik = (mx - mn).abs() < 1e-9 ? 1.0 : (mx - mn);
+    double y(double f) => size.height - ((f - mn) / aralik) * size.height;
+    final n = mumlar.length;
+    final gen = size.width / n;
+    final govdeW = gen * 0.6;
+    for (int i = 0; i < n; i++) {
+      final m = mumlar[i];
+      final o = _d(m["o"]);
+      final c = _d(m["c"]);
+      final h = _d(m["h"]);
+      final l = _d(m["l"]);
+      final x = gen * i + gen / 2;
+      final renk = c >= o ? Renk.teal : Renk.kirmizi;
+      canvas.drawLine(Offset(x, y(h)), Offset(x, y(l)), Paint()..color = renk..strokeWidth = 1);
+      final ust = y(math.max(o, c));
+      var alt = y(math.min(o, c));
+      if (alt < ust + 1) alt = ust + 1;
+      canvas.drawRect(Rect.fromLTRB(x - govdeW / 2, ust, x + govdeW / 2, alt), Paint()..color = renk);
+    }
+    for (final s in seviyeler) {
+      final f = _d(s["fiyat"]);
+      if (f < mn || f > mx) continue;
+      final yy = y(f);
+      final guc = (s["guc"] is num) ? (s["guc"] as num).toInt() : 0;
+      final cizgi = Paint()
+        ..color = Renk.altin.withOpacity(0.55)
+        ..strokeWidth = guc >= 3 ? 1.5 : 0.8;
+      double sx = 0;
+      while (sx < size.width) {
+        canvas.drawLine(Offset(sx, yy), Offset(sx + 6, yy), cizgi);
+        sx += 12;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _MumPainter o) => true;
+}
+
+class _Halka extends StatelessWidget {
+  final double yuzde;
+  final String etiket;
+  final double boyut;
+  const _Halka({required this.yuzde, required this.etiket, this.boyut = 80});
+  @override
+  Widget build(BuildContext context) {
+    final renk = yuzde >= 0.66 ? Renk.teal : (yuzde >= 0.4 ? Renk.altin : Renk.kirmizi);
+    return SizedBox(
+      width: boyut,
+      height: boyut,
+      child: Stack(alignment: Alignment.center, children: [
+        CustomPaint(size: Size(boyut, boyut), painter: _HalkaPainter(yuzde.clamp(0.0, 1.0), renk)),
+        Text(etiket, style: TextStyle(color: renk, fontWeight: FontWeight.w700, fontSize: boyut * 0.22)),
+      ]),
+    );
+  }
+}
+
+class _HalkaPainter extends CustomPainter {
+  final double yuzde;
+  final Color renk;
+  _HalkaPainter(this.yuzde, this.renk);
+  @override
+  void paint(Canvas canvas, Size size) {
+    final merkez = Offset(size.width / 2, size.height / 2);
+    final yari = size.width / 2 - 4;
+    canvas.drawCircle(
+        merkez,
+        yari,
+        Paint()
+          ..color = Renk.kartAcik
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 6
+          ..strokeCap = StrokeCap.round);
+    canvas.drawArc(
+        Rect.fromCircle(center: merkez, radius: yari),
+        -math.pi / 2,
+        2 * math.pi * yuzde,
+        false,
+        Paint()
+          ..color = renk
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 6
+          ..strokeCap = StrokeCap.round);
+  }
+
+  @override
+  bool shouldRepaint(covariant _HalkaPainter o) => o.yuzde != yuzde || o.renk != renk;
+}
 // ============================================================
 //  KOD YAGMURU - turkuaz Matrix tarzi arka plan animasyonu
 //  Giris ekraninin arkasinda yukaridan asagi akan kod/karakterler.
